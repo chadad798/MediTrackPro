@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { Drug, SaleRecord, User } from './types';
+import { Drug, SaleRecord, User, FieldChange, ModificationLog } from './types';
 import { dataService } from './services/dataService';
 import { Layout } from './components/Layout';
 import Dashboard from './pages/Dashboard';
@@ -17,11 +17,15 @@ interface PharmacyContextType {
   login: (u: User) => void;
   logout: () => void;
   drugs: Drug[];
+  deletedDrugs: Drug[];
   sales: SaleRecord[];
   addDrug: (d: Drug) => void;
+  batchAddDrugs: (d: Drug[]) => void;
   updateDrug: (d: Drug) => void;
   deleteDrug: (id: string) => void;
   batchDeleteDrugs: (ids: string[]) => void;
+  restoreDrug: (id: string) => void;
+  permanentlyDeleteDrug: (id: string) => void;
   toggleDrugLock: (id: string) => void;
   recordSale: (s: SaleRecord) => void;
   refreshData: () => void;
@@ -39,6 +43,7 @@ export const usePharmacy = () => {
 const PharmacyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [drugs, setDrugs] = useState<Drug[]>([]);
+  const [deletedDrugs, setDeletedDrugs] = useState<Drug[]>([]);
   const [sales, setSales] = useState<SaleRecord[]>([]);
 
   // Initialize data
@@ -48,6 +53,7 @@ const PharmacyProvider: React.FC<{ children: React.ReactNode }> = ({ children })
 
   const refreshData = () => {
     setDrugs(dataService.getDrugs());
+    setDeletedDrugs(dataService.getDeletedDrugs());
     setSales(dataService.getSales());
   };
 
@@ -55,27 +61,120 @@ const PharmacyProvider: React.FC<{ children: React.ReactNode }> = ({ children })
   const logout = () => setUser(null);
 
   const addDrug = (drug: Drug) => {
-    const newDrugs = [...drugs, drug];
+    const drugWithHistory = { ...drug, history: [] };
+    const newDrugs = [...drugs, drugWithHistory];
     setDrugs(newDrugs);
     dataService.saveDrugs(newDrugs);
   };
 
-  const updateDrug = (drug: Drug) => {
-    const newDrugs = drugs.map(d => d.id === drug.id ? drug : d);
+  const batchAddDrugs = (newDrugsList: Drug[]) => {
+    const processedList = newDrugsList.map(d => ({ ...d, history: [] }));
+    const newDrugs = [...drugs, ...processedList];
+    setDrugs(newDrugs);
+    dataService.saveDrugs(newDrugs);
+  };
+
+  const updateDrug = (updatedDrug: Drug) => {
+    const originalDrug = drugs.find(d => d.id === updatedDrug.id);
+    
+    if (originalDrug) {
+      // Calculate changes
+      const changes: FieldChange[] = [];
+      const fieldsToCheck: (keyof Drug)[] = ['name', 'code', 'category', 'manufacturer', 'price', 'stock', 'minStockThreshold', 'expiryDate', 'description', 'sideEffects'];
+      
+      fieldsToCheck.forEach(field => {
+        if (originalDrug[field] !== updatedDrug[field]) {
+           // Basic comparison (strict equality works for primitives in Drug)
+           changes.push({
+             field: field as string,
+             oldValue: originalDrug[field],
+             newValue: updatedDrug[field]
+           });
+        }
+      });
+
+      // If there are changes, record them
+      if (changes.length > 0) {
+        const modification: ModificationLog = {
+          timestamp: new Date().toISOString(),
+          changedBy: user?.name || '未知用户',
+          changes: changes
+        };
+        
+        updatedDrug.history = [modification, ...(originalDrug.history || [])];
+      } else {
+        // Preserve history if no changes detected but update called (e.g. strict mode re-renders)
+        updatedDrug.history = originalDrug.history;
+      }
+    }
+
+    const newDrugs = drugs.map(d => d.id === updatedDrug.id ? updatedDrug : d);
     setDrugs(newDrugs);
     dataService.saveDrugs(newDrugs);
   };
 
   const deleteDrug = (id: string) => {
+    const drugToDelete = drugs.find(d => d.id === id);
+    if (!drugToDelete) return;
+
+    // Remove from active list
     const newDrugs = drugs.filter(d => d.id !== id);
+    setDrugs(newDrugs);
+    dataService.saveDrugs(newDrugs);
+
+    // Add to deleted list with metadata
+    const deletedDrug: Drug = {
+      ...drugToDelete,
+      deletedAt: new Date().toISOString(),
+      deletedBy: user?.name || '未知用户'
+    };
+    const newDeletedDrugs = [deletedDrug, ...deletedDrugs];
+    setDeletedDrugs(newDeletedDrugs);
+    dataService.saveDeletedDrugs(newDeletedDrugs);
+  };
+
+  const batchDeleteDrugs = (ids: string[]) => {
+    // Identify drugs to delete
+    const drugsToDelete = drugs.filter(d => ids.includes(d.id));
+    
+    // Remove from active list
+    const newDrugs = drugs.filter(d => !ids.includes(d.id));
+    setDrugs(newDrugs);
+    dataService.saveDrugs(newDrugs);
+
+    // Add to deleted list with metadata
+    const now = new Date().toISOString();
+    const newDeletedItems = drugsToDelete.map(d => ({
+      ...d,
+      deletedAt: now,
+      deletedBy: user?.name || '未知用户'
+    }));
+
+    const newDeletedDrugs = [...newDeletedItems, ...deletedDrugs];
+    setDeletedDrugs(newDeletedDrugs);
+    dataService.saveDeletedDrugs(newDeletedDrugs);
+  };
+
+  const restoreDrug = (id: string) => {
+    const drugToRestore = deletedDrugs.find(d => d.id === id);
+    if (!drugToRestore) return;
+
+    // Remove from deleted list
+    const newDeletedDrugs = deletedDrugs.filter(d => d.id !== id);
+    setDeletedDrugs(newDeletedDrugs);
+    dataService.saveDeletedDrugs(newDeletedDrugs);
+
+    // Add back to active list (cleaning deletion metadata)
+    const { deletedAt, deletedBy, ...cleanedDrug } = drugToRestore;
+    const newDrugs = [cleanedDrug, ...drugs];
     setDrugs(newDrugs);
     dataService.saveDrugs(newDrugs);
   };
 
-  const batchDeleteDrugs = (ids: string[]) => {
-    const newDrugs = drugs.filter(d => !ids.includes(d.id));
-    setDrugs(newDrugs);
-    dataService.saveDrugs(newDrugs);
+  const permanentlyDeleteDrug = (id: string) => {
+    const newDeletedDrugs = deletedDrugs.filter(d => d.id !== id);
+    setDeletedDrugs(newDeletedDrugs);
+    dataService.saveDeletedDrugs(newDeletedDrugs);
   };
 
   const toggleDrugLock = (id: string) => {
@@ -114,7 +213,13 @@ const PharmacyProvider: React.FC<{ children: React.ReactNode }> = ({ children })
   };
 
   return (
-    <PharmacyContext.Provider value={{ user, login, logout, drugs, sales, addDrug, updateDrug, deleteDrug, batchDeleteDrugs, toggleDrugLock, recordSale, refreshData, updateUser }}>
+    <PharmacyContext.Provider value={{ 
+      user, login, logout, 
+      drugs, deletedDrugs, sales, 
+      addDrug, batchAddDrugs, updateDrug, 
+      deleteDrug, batchDeleteDrugs, restoreDrug, permanentlyDeleteDrug,
+      toggleDrugLock, recordSale, refreshData, updateUser 
+    }}>
       {children}
     </PharmacyContext.Provider>
   );

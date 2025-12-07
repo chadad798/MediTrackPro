@@ -17,11 +17,21 @@ const Dashboard: React.FC = () => {
   const lowStockCount = lowStockDrugs.length;
   const totalInventoryValue = drugs.reduce((acc, drug) => acc + (drug.price * drug.stock), 0);
 
-  // Prepare chart data (Sales over last 7 entries for simplicity)
-  const salesChartData = sales.slice(0, 7).reverse().map(s => ({
-    name: new Date(s.timestamp).toLocaleDateString('zh-CN', { weekday: 'short' }),
-    amount: s.totalAmount
-  }));
+  // Prepare chart data (Aggregate sales by Date)
+  // Logic: Group by date string, sum amounts, then sort by date
+  const salesByDate = sales.reduce((acc, sale) => {
+    const dateKey = new Date(sale.timestamp).toLocaleDateString('zh-CN');
+    acc[dateKey] = (acc[dateKey] || 0) + sale.totalAmount;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const salesChartData = Object.keys(salesByDate)
+    .map(date => ({
+      date: date, // Full date string for sorting and tooltip (e.g., 2023/10/24)
+      amount: salesByDate[date]
+    }))
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .slice(-7); // Keep last 7 days with activity
 
   // Prepare inventory category data
   const categoryData: Record<string, number> = {};
@@ -107,14 +117,25 @@ const Dashboard: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Sales Trend */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-          <h3 className="text-lg font-semibold text-slate-800 mb-4">近期销售趋势</h3>
+          <h3 className="text-lg font-semibold text-slate-800 mb-4">近期销售趋势 (按日汇总)</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={salesChartData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b'}} />
+                <XAxis 
+                  dataKey="date" 
+                  tickFormatter={(val) => {
+                    const d = new Date(val);
+                    return `${d.getMonth() + 1}/${d.getDate()}`;
+                  }}
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{fill: '#64748b'}} 
+                />
                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b'}} />
                 <Tooltip 
+                  labelFormatter={(val) => val}
+                  formatter={(value: number) => [`¥${value.toFixed(2)}`, '销售额']}
                   contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} 
                 />
                 <Line type="monotone" dataKey="amount" stroke="#0ea5e9" strokeWidth={3} dot={{r: 4}} activeDot={{r: 6}} />
@@ -131,7 +152,7 @@ const Dashboard: React.FC = () => {
               <BarChart data={barChartData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
-                <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b'}} />
+                <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b'}} allowDecimals={false} />
                 <Tooltip cursor={{fill: '#f1f5f9'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
                 <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={40} />
               </BarChart>

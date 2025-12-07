@@ -1,4 +1,16 @@
 
+export interface FieldChange {
+  field: string;
+  oldValue: any;
+  newValue: any;
+}
+
+export interface ModificationLog {
+  timestamp: string;
+  changedBy: string;
+  changes: FieldChange[];
+}
+
 export interface Drug {
   id: string;
   code: string;
@@ -14,6 +26,9 @@ export interface Drug {
   isLocked?: boolean; // Controls deletion restriction
   createdAt?: string; // ISO string for import date tracking
   createdBy?: string; // Name of the user who added this record
+  deletedAt?: string; // ISO string for deletion time
+  deletedBy?: string; // Name of the user who deleted this record
+  history?: ModificationLog[]; // Audit trail for modifications
 }
 
 export interface SaleItem {
