@@ -1,14 +1,13 @@
 // Prisma Schema for MediTrack Pro
-// 使用 Neon Postgres (通过 Vercel Marketplace)
+// 使用 Neon Postgres
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DATABASE_URL_UNPOOLED")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ==================== 用户表 ====================
