@@ -1,17 +1,5 @@
 {
-  "buildCommand": "prisma generate && next build",
-  "installCommand": "npm install",
-  "framework": "nextjs",
-  "regions": ["iad1"],
-  "functions": {
-    "api/auth/login/route.ts": {
-      "maxDuration": 10
-    },
-    "api/auth/register/route.ts": {
-      "maxDuration": 10
-    },
-    "api/auth/logout/route.ts": {
-      "maxDuration": 10
-    }
-  }
+  "buildCommand": "prisma generate && vite build",
+  "outputDirectory": "dist",
+  "framework": "vite"
 }

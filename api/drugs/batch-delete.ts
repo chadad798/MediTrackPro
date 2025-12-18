@@ -1,29 +1,24 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from '../_lib/prisma';
-import { getAuthUser, jsonResponse, errorResponse, successResponse } from '../_lib/auth';
+import { getAuthUser, handleCors } from '../_lib/auth';
 
-export const config = {
-  runtime: 'edge',
-};
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleCors(req, res)) return;
 
-export default async function handler(request: Request) {
-  if (request.method === 'OPTIONS') {
-    return jsonResponse({});
+  if (req.method !== 'POST') {
+    return res.status(405).json({ success: false, message: 'Method not allowed' });
   }
 
-  if (request.method !== 'POST') {
-    return errorResponse('Method not allowed', 405);
-  }
-
-  const user = await getAuthUser(request);
+  const user = await getAuthUser(req);
   if (!user) {
-    return errorResponse('未授权访问', 401);
+    return res.status(401).json({ success: false, message: '未授权访问' });
   }
 
   try {
-    const { ids } = await request.json();
+    const { ids } = req.body;
 
     if (!Array.isArray(ids) || ids.length === 0) {
-      return errorResponse('请提供要删除的药品 ID 列表');
+      return res.status(400).json({ success: false, message: '请提供要删除的药品 ID 列表' });
     }
 
     // 检查是否有锁定的药品
@@ -34,7 +29,10 @@ export default async function handler(request: Request) {
 
     const lockedDrugs = drugs.filter(d => d.isLocked);
     if (lockedDrugs.length > 0) {
-      return errorResponse(`以下药品已锁定，无法删除: ${lockedDrugs.map(d => d.name).join(', ')}`);
+      return res.status(400).json({ 
+        success: false, 
+        message: `以下药品已锁定，无法删除: ${lockedDrugs.map(d => d.name).join(', ')}` 
+      });
     }
 
     // 批量软删除
@@ -50,10 +48,14 @@ export default async function handler(request: Request) {
       },
     });
 
-    return successResponse({ count: result.count }, `成功删除 ${result.count} 个药品`);
+    return res.status(200).json({ 
+      success: true, 
+      data: { count: result.count }, 
+      message: `成功删除 ${result.count} 个药品` 
+    });
 
   } catch (error) {
     console.error('Batch delete error:', error);
-    return errorResponse('批量删除失败', 500);
+    return res.status(500).json({ success: false, message: '批量删除失败' });
   }
 }

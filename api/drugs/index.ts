@@ -1,26 +1,20 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from '../_lib/prisma';
-import { getAuthUser, jsonResponse, errorResponse, successResponse } from '../_lib/auth';
+import { getAuthUser, handleCors } from '../_lib/auth';
 
-export const config = {
-  runtime: 'edge',
-};
-
-export default async function handler(request: Request) {
-  if (request.method === 'OPTIONS') {
-    return jsonResponse({});
-  }
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleCors(req, res)) return;
 
   // 验证用户身份
-  const user = await getAuthUser(request);
+  const user = await getAuthUser(req);
   if (!user) {
-    return errorResponse('未授权访问', 401);
+    return res.status(401).json({ success: false, message: '未授权访问' });
   }
 
   // GET - 获取药品列表
-  if (request.method === 'GET') {
+  if (req.method === 'GET') {
     try {
-      const url = new URL(request.url);
-      const includeDeleted = url.searchParams.get('deleted') === 'true';
+      const includeDeleted = req.query.deleted === 'true';
 
       const drugs = await prisma.drug.findMany({
         where: {
@@ -45,7 +39,6 @@ export default async function handler(request: Request) {
         orderBy: { createdAt: 'desc' },
       });
 
-      // 转换为前端期望的格式
       const formattedDrugs = drugs.map(drug => ({
         id: drug.id,
         code: drug.code,
@@ -70,21 +63,20 @@ export default async function handler(request: Request) {
         })),
       }));
 
-      return successResponse(formattedDrugs);
+      return res.status(200).json({ success: true, data: formattedDrugs });
     } catch (error) {
       console.error('Get drugs error:', error);
-      return errorResponse('获取药品列表失败', 500);
+      return res.status(500).json({ success: false, message: '获取药品列表失败' });
     }
   }
 
   // POST - 添加药品
-  if (request.method === 'POST') {
+  if (req.method === 'POST') {
     try {
-      const body = await request.json();
+      const body = req.body;
       
-      // 检查是否是批量导入
+      // 批量添加
       if (Array.isArray(body)) {
-        // 批量添加
         const drugs = await Promise.all(
           body.map(async (drugData: any) => {
             return prisma.drug.create({
@@ -106,16 +98,19 @@ export default async function handler(request: Request) {
           })
         );
 
-        return successResponse(drugs, `成功添加 ${drugs.length} 个药品`);
+        return res.status(200).json({ 
+          success: true, 
+          data: drugs, 
+          message: `成功添加 ${drugs.length} 个药品` 
+        });
       }
 
       // 单个添加
       const { code, name, category, manufacturer, price, stock, minStockThreshold, expiryDate, description, sideEffects, isLocked } = body;
 
-      // 检查编码是否已存在
       const existing = await prisma.drug.findUnique({ where: { code } });
       if (existing) {
-        return errorResponse('药品编码已存在');
+        return res.status(400).json({ success: false, message: '药品编码已存在' });
       }
 
       const drug = await prisma.drug.create({
@@ -135,28 +130,32 @@ export default async function handler(request: Request) {
         },
       });
 
-      return successResponse({
-        id: drug.id,
-        code: drug.code,
-        name: drug.name,
-        category: drug.category,
-        manufacturer: drug.manufacturer,
-        price: drug.price,
-        stock: drug.stock,
-        minStockThreshold: drug.minStockThreshold,
-        expiryDate: drug.expiryDate.toISOString().split('T')[0],
-        description: drug.description,
-        isLocked: drug.isLocked,
-        createdAt: drug.createdAt.toISOString(),
-        createdBy: user.name,
-        history: [],
-      }, '药品添加成功');
+      return res.status(200).json({
+        success: true,
+        message: '药品添加成功',
+        data: {
+          id: drug.id,
+          code: drug.code,
+          name: drug.name,
+          category: drug.category,
+          manufacturer: drug.manufacturer,
+          price: drug.price,
+          stock: drug.stock,
+          minStockThreshold: drug.minStockThreshold,
+          expiryDate: drug.expiryDate.toISOString().split('T')[0],
+          description: drug.description,
+          isLocked: drug.isLocked,
+          createdAt: drug.createdAt.toISOString(),
+          createdBy: user.name,
+          history: [],
+        },
+      });
 
     } catch (error) {
       console.error('Add drug error:', error);
-      return errorResponse('添加药品失败', 500);
+      return res.status(500).json({ success: false, message: '添加药品失败' });
     }
   }
 
-  return errorResponse('Method not allowed', 405);
+  return res.status(405).json({ success: false, message: 'Method not allowed' });
 }

@@ -1,26 +1,20 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from '../_lib/prisma';
-import { getAuthUser, jsonResponse, errorResponse, successResponse } from '../_lib/auth';
+import { getAuthUser, handleCors } from '../_lib/auth';
 
-export const config = {
-  runtime: 'edge',
-};
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleCors(req, res)) return;
 
-export default async function handler(request: Request) {
-  if (request.method === 'OPTIONS') {
-    return jsonResponse({});
-  }
-
-  const user = await getAuthUser(request);
+  const user = await getAuthUser(req);
   if (!user) {
-    return errorResponse('未授权访问', 401);
+    return res.status(401).json({ success: false, message: '未授权访问' });
   }
 
   // GET - 获取销售记录
-  if (request.method === 'GET') {
+  if (req.method === 'GET') {
     try {
-      const url = new URL(request.url);
-      const limit = parseInt(url.searchParams.get('limit') || '100');
-      const offset = parseInt(url.searchParams.get('offset') || '0');
+      const limit = parseInt(req.query.limit as string) || 100;
+      const offset = parseInt(req.query.offset as string) || 0;
 
       const sales = await prisma.saleRecord.findMany({
         include: {
@@ -40,7 +34,6 @@ export default async function handler(request: Request) {
         skip: offset,
       });
 
-      // 转换为前端期望的格式
       const formattedSales = sales.map(sale => ({
         id: sale.id,
         timestamp: sale.timestamp.toISOString(),
@@ -56,20 +49,20 @@ export default async function handler(request: Request) {
         })),
       }));
 
-      return successResponse(formattedSales);
+      return res.status(200).json({ success: true, data: formattedSales });
     } catch (error) {
       console.error('Get sales error:', error);
-      return errorResponse('获取销售记录失败', 500);
+      return res.status(500).json({ success: false, message: '获取销售记录失败' });
     }
   }
 
   // POST - 创建销售记录
-  if (request.method === 'POST') {
+  if (req.method === 'POST') {
     try {
-      const { items, customerName } = await request.json();
+      const { items, customerName } = req.body;
 
       if (!Array.isArray(items) || items.length === 0) {
-        return errorResponse('购物车不能为空');
+        return res.status(400).json({ success: false, message: '购物车不能为空' });
       }
 
       // 验证库存并计算总额
@@ -82,11 +75,14 @@ export default async function handler(request: Request) {
         });
 
         if (!drug) {
-          return errorResponse(`药品不存在: ${item.drugId}`);
+          return res.status(400).json({ success: false, message: `药品不存在: ${item.drugId}` });
         }
 
         if (drug.stock < item.quantity) {
-          return errorResponse(`${drug.name} 库存不足，仅剩 ${drug.stock} 件`);
+          return res.status(400).json({ 
+            success: false, 
+            message: `${drug.name} 库存不足，仅剩 ${drug.stock} 件` 
+          });
         }
 
         const itemTotal = drug.price * item.quantity;
@@ -101,7 +97,7 @@ export default async function handler(request: Request) {
         });
       }
 
-      // 创建事务：同时创建销售记录和更新库存
+      // 创建事务
       const sale = await prisma.$transaction(async (tx) => {
         // 1. 创建销售记录
         const saleRecord = await tx.saleRecord.create({
@@ -137,20 +133,24 @@ export default async function handler(request: Request) {
         return saleRecord;
       });
 
-      return successResponse({
-        id: sale.id,
-        timestamp: sale.timestamp.toISOString(),
-        totalAmount: sale.totalAmount,
-        cashierName: sale.cashier.name,
-        customerName: sale.customerName,
-        items: validatedItems,
-      }, '销售录入成功');
+      return res.status(200).json({
+        success: true,
+        message: '销售录入成功',
+        data: {
+          id: sale.id,
+          timestamp: sale.timestamp.toISOString(),
+          totalAmount: sale.totalAmount,
+          cashierName: sale.cashier.name,
+          customerName: sale.customerName,
+          items: validatedItems,
+        },
+      });
 
     } catch (error) {
       console.error('Create sale error:', error);
-      return errorResponse('销售录入失败', 500);
+      return res.status(500).json({ success: false, message: '销售录入失败' });
     }
   }
 
-  return errorResponse('Method not allowed', 405);
+  return res.status(405).json({ success: false, message: 'Method not allowed' });
 }

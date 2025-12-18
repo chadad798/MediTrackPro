@@ -1,23 +1,18 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { prisma } from '../_lib/prisma';
-import { getAuthUser, jsonResponse, errorResponse, successResponse } from '../_lib/auth';
+import { getAuthUser, handleCors } from '../_lib/auth';
 import bcrypt from 'bcryptjs';
 
-export const config = {
-  runtime: 'edge',
-};
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleCors(req, res)) return;
 
-export default async function handler(request: Request) {
-  if (request.method === 'OPTIONS') {
-    return jsonResponse({});
-  }
-
-  const user = await getAuthUser(request);
+  const user = await getAuthUser(req);
   if (!user) {
-    return errorResponse('未授权访问', 401);
+    return res.status(401).json({ success: false, message: '未授权访问' });
   }
 
   // GET - 获取当前用户信息
-  if (request.method === 'GET') {
+  if (req.method === 'GET') {
     try {
       const userData = await prisma.user.findUnique({
         where: { id: user.userId },
@@ -31,26 +26,29 @@ export default async function handler(request: Request) {
       });
 
       if (!userData) {
-        return errorResponse('用户不存在', 404);
+        return res.status(404).json({ success: false, message: '用户不存在' });
       }
 
-      return successResponse({
-        id: userData.id,
-        username: userData.username,
-        name: userData.name,
-        role: userData.role.toLowerCase(),
-        createdAt: userData.createdAt.toISOString(),
+      return res.status(200).json({
+        success: true,
+        data: {
+          id: userData.id,
+          username: userData.username,
+          name: userData.name,
+          role: userData.role.toLowerCase(),
+          createdAt: userData.createdAt.toISOString(),
+        },
       });
     } catch (error) {
       console.error('Get user error:', error);
-      return errorResponse('获取用户信息失败', 500);
+      return res.status(500).json({ success: false, message: '获取用户信息失败' });
     }
   }
 
   // PUT - 更新用户信息
-  if (request.method === 'PUT') {
+  if (req.method === 'PUT') {
     try {
-      const { name, password } = await request.json();
+      const { name, password } = req.body;
 
       const updateData: any = {};
 
@@ -63,7 +61,7 @@ export default async function handler(request: Request) {
       }
 
       if (Object.keys(updateData).length === 0) {
-        return errorResponse('没有要更新的字段');
+        return res.status(400).json({ success: false, message: '没有要更新的字段' });
       }
 
       const updated = await prisma.user.update({
@@ -77,18 +75,22 @@ export default async function handler(request: Request) {
         },
       });
 
-      return successResponse({
-        id: updated.id,
-        username: updated.username,
-        name: updated.name,
-        role: updated.role.toLowerCase(),
-      }, '用户信息更新成功');
+      return res.status(200).json({
+        success: true,
+        message: '用户信息更新成功',
+        data: {
+          id: updated.id,
+          username: updated.username,
+          name: updated.name,
+          role: updated.role.toLowerCase(),
+        },
+      });
 
     } catch (error) {
       console.error('Update user error:', error);
-      return errorResponse('更新用户信息失败', 500);
+      return res.status(500).json({ success: false, message: '更新用户信息失败' });
     }
   }
 
-  return errorResponse('Method not allowed', 405);
+  return res.status(405).json({ success: false, message: 'Method not allowed' });
 }
