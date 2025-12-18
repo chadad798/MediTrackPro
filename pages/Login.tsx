@@ -1,23 +1,22 @@
-
 import React, { useState } from 'react';
 import { usePharmacy } from '../App';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Lock, User as UserIcon, UserPlus, ArrowRight } from 'lucide-react';
+import { Activity, Lock, User as UserIcon, UserPlus, ArrowRight, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { dataService } from '../services/dataService';
-import { User } from '../types';
+import { authService } from '../services/dataService';
 
 const Login: React.FC = () => {
   const { login } = usePharmacy();
   const navigate = useNavigate();
   
   const [isRegistering, setIsRegistering] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<'admin' | 'pharmacist'>('pharmacist');
 
-  const handleAuth = (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!username || !password) {
@@ -25,39 +24,47 @@ const Login: React.FC = () => {
       return;
     }
 
-    if (isRegistering) {
-      if (!name) {
-         toast.error('请输入您的全名');
-         return;
-      }
-      // Register Logic
-      const newUser: User = {
-        id: `u-${Date.now()}`,
-        username,
-        password,
-        name,
-        role
-      };
+    setIsLoading(true);
 
-      const result = dataService.registerUser(newUser);
-      if (result.success) {
-        toast.success('注册成功！请登录。');
-        setIsRegistering(false);
-        setPassword(''); // clear password for safety
-      } else {
-        toast.error(result.message);
-      }
+    try {
+      if (isRegistering) {
+        // 注册逻辑
+        if (!name) {
+          toast.error('请输入您的姓名');
+          setIsLoading(false);
+          return;
+        }
 
-    } else {
-      // Login Logic
-      const user = dataService.loginUser(username, password);
-      if (user) {
-        login(user);
-        toast.success(`欢迎回来, ${user.name}!`);
-        navigate('/dashboard');
+        const result = await authService.register({
+          username,
+          password,
+          name,
+          role
+        });
+
+        if (result.success) {
+          toast.success('注册成功！请登录。');
+          setIsRegistering(false);
+          setPassword('');
+        } else {
+          toast.error(result.message || '注册失败');
+        }
+
       } else {
-        toast.error('用户名或密码错误');
+        // 登录逻辑
+        const result = await authService.login(username, password);
+        
+        if (result.user) {
+          login(result.user);
+          toast.success(`欢迎回来, ${result.user.name}!`);
+          navigate('/dashboard');
+        }
       }
+    } catch (error: any) {
+      console.error('Auth error:', error);
+      toast.error(error.message || '操作失败，请重试');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -96,6 +103,7 @@ const Login: React.FC = () => {
                   onChange={e => setName(e.target.value)}
                   className="w-full pl-10 pr-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none bg-white text-slate-800"
                   placeholder="例如：张三"
+                  disabled={isLoading}
                 />
               </div>
             </div>
@@ -112,6 +120,7 @@ const Login: React.FC = () => {
                 onChange={e => setUsername(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none bg-white text-slate-800"
                 placeholder="请输入用户名"
+                disabled={isLoading}
               />
             </div>
           </div>
@@ -127,6 +136,7 @@ const Login: React.FC = () => {
                 onChange={e => setPassword(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none bg-white text-slate-800"
                 placeholder="••••••••"
+                disabled={isLoading}
               />
             </div>
           </div>
@@ -138,6 +148,7 @@ const Login: React.FC = () => {
                  value={role}
                  onChange={(e) => setRole(e.target.value as any)}
                  className="w-full p-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none bg-white text-slate-800"
+                 disabled={isLoading}
                >
                  <option value="pharmacist">药剂师</option>
                  <option value="admin">系统管理员</option>
@@ -148,9 +159,15 @@ const Login: React.FC = () => {
 
           <button 
             type="submit"
-            className="w-full bg-primary-600 hover:bg-primary-700 text-white font-bold py-3 rounded-lg transition-colors shadow-md hover:shadow-lg mt-4 flex items-center justify-center space-x-2"
+            disabled={isLoading}
+            className="w-full bg-primary-600 hover:bg-primary-700 disabled:bg-primary-400 text-white font-bold py-3 rounded-lg transition-colors shadow-md hover:shadow-lg mt-4 flex items-center justify-center space-x-2"
           >
-            {isRegistering ? (
+            {isLoading ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span>处理中...</span>
+              </>
+            ) : isRegistering ? (
               <>
                 <UserPlus className="h-5 w-5" />
                 <span>创建账号</span>
@@ -170,7 +187,8 @@ const Login: React.FC = () => {
            </p>
            <button 
              onClick={toggleMode}
-             className="text-primary-600 hover:text-primary-700 font-semibold text-sm hover:underline"
+             disabled={isLoading}
+             className="text-primary-600 hover:text-primary-700 font-semibold text-sm hover:underline disabled:opacity-50"
            >
              {isRegistering ? "返回登录" : "注册新用户"}
            </button>
